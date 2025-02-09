@@ -5,7 +5,7 @@
 ###############################
 
 import numpy as np
-from fre.common.typing import Data, Array
+from common.typing import Data, Array
 from flax.core.frozen_dict import FrozenDict
 from jax import tree_util
 

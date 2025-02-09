@@ -5,8 +5,8 @@ import tqdm
 import numpy as np
 from collections import defaultdict
 
-# from fre.common.envs.d4rl import d4rl_utils
-from fre.common.dataset import Dataset
+# from common.envs.d4rl import d4rl_utils
+from common.dataset import Dataset
 
 # get path relative to 'fre' package
 data_path = os.path.dirname(os.path.abspath(__file__))

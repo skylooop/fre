@@ -4,7 +4,7 @@
 #
 ###############################
 
-from fre.common.typing import *
+from common.typing import *
 
 import flax.linen as nn
 import jax.numpy as jnp

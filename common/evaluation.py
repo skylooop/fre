@@ -49,7 +49,7 @@ def evaluate(policy_fn, env: gym.Env, num_episodes: int, record_video : bool = F
         ob_list.append(observation)
         while not done:
             if use_discrete_xy:
-                import fre.common.envs.d4rl.d4rl_ant as d4rl_ant
+                import common.envs.d4rl.d4rl_ant as d4rl_ant
                 ob_input = d4rl_ant.discretize_obs(observation)
             else:
                 ob_input = observation

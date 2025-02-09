@@ -1,6 +1,5 @@
 import numpy as np
 import tqdm
-import opensimplex
 import jax
 import jax.numpy as jnp
 from functools import partial

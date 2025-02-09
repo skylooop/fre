@@ -9,7 +9,7 @@ from dm_env import Environment
 from dm_env import StepType, specs
 from dm_control import suite
 from dm_control.suite.wrappers import action_scale, pixels
-import fre.common.envs.exorl.custom_dmc_tasks as cdmc
+import common.envs.exorl.custom_dmc_tasks as cdmc
 import numpy as np
 
 

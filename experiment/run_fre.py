@@ -1,6 +1,10 @@
 
 import jax
 import jax.numpy as jnp
+import os
+os.environ['CUDA_VISIBLE_DEVICES']='0'
+os.environ['MUJOCO_GL']='egl'
+
 import numpy as np
 import optax
 import flax.linen as nn
@@ -14,22 +18,25 @@ import tqdm
 from flax.training import checkpoints
 import matplotlib.pyplot as plt
 import wandb
+import rootutils
 
-from fre.common.typing import *
-from fre.common.networks.transformer import Transformer
-import fre.common.networks.transformer as transformer
-from fre.common.dataset import Dataset
-from fre.common.typing import *
-from fre.common.train_state import TrainState, target_update
-from fre.common.networks.basic import Policy, ValueCritic, Critic, ensemblize
-from fre.common.wandb import setup_wandb, default_wandb_config, get_flag_dict
-from fre.common.envs.gc_utils import GCDataset
-from fre.common.envs.env_helper import make_env, get_dataset
-from fre.common.evaluation import evaluate
-from fre.common.envs.wrappers import EpisodeMonitor, RewardOverride, TruncateObservation
-from fre.common.utils import supply_rng
-from fre.experiment.rewards_unsupervised import *
-from fre.experiment.rewards_eval import *
+ROOT = rootutils.setup_root(search_from=__file__, cwd=True, pythonpath=True)
+
+from common.typing import *
+from common.networks.transformer import Transformer
+import common.networks.transformer as transformer
+from common.dataset import Dataset
+from common.typing import *
+from common.train_state import TrainState, target_update
+from common.networks.basic import Policy, ValueCritic, Critic, ensemblize
+from common.wandb import setup_wandb, default_wandb_config, get_flag_dict
+from common.envs.gc_utils import GCDataset
+from common.envs.env_helper import make_env, get_dataset
+from common.evaluation import evaluate
+from common.envs.wrappers import EpisodeMonitor, RewardOverride, TruncateObservation
+from common.utils import supply_rng
+from experiment.rewards_unsupervised import *
+from experiment.rewards_eval import *
 
 import flax
 
@@ -46,12 +53,12 @@ flags.DEFINE_string('save_dir', None, 'Logging dir (if not None, save params).')
 flags.DEFINE_string('load_dir', None, 'Logging dir (if not None, load params).')
 
 flags.DEFINE_integer('seed', np.random.choice(1000000), 'Random seed.')
-flags.DEFINE_integer('eval_episodes', 20,
+flags.DEFINE_integer('eval_episodes', 1,
                      'Number of episodes used for evaluation.')
 flags.DEFINE_integer('log_interval', 1000, 'Logging interval.')
 flags.DEFINE_integer('eval_interval', 200000, 'Eval interval.')
 flags.DEFINE_integer('save_interval', 200000, 'Eval interval.')
-flags.DEFINE_integer('video_interval', 10050000, 'Eval interval.')
+flags.DEFINE_integer('video_interval', 2, 'Eval interval.')
 flags.DEFINE_integer('batch_size', 512, 'Mini batch size.')
 flags.DEFINE_integer('max_steps', int(1e6), 'Number of training steps.')
 
@@ -196,15 +203,15 @@ class FREAgent(flax.struct.PyTreeNode):
 
         def full_loss_fn(params):
             if train_encoder:
-                w_mean, w_log_std = agent.fre.do('get_transformer_encoding')(reward_state_pairs, params=params)
+                w_mean, w_log_std = agent.fre.select('get_transformer_encoding')(reward_state_pairs, params=params)
             else:
-                w_mean, w_log_std = agent.fre.do('get_transformer_encoding')(reward_state_pairs)
+                w_mean, w_log_std = agent.fre.select('get_transformer_encoding')(reward_state_pairs)
             w_no_grad = jax.lax.stop_gradient(w_mean)
 
             if train_encoder:
                 # Reward Pred Loss
                 w = w_mean + jax.random.normal(agent.rng, w_mean.shape) * jnp.exp(w_log_std)
-                reward_pred = agent.fre.do('get_reward_pred')(w, reward_pairs_decode, params=params)
+                reward_pred = agent.fre.select('get_reward_pred')(w, reward_pairs_decode, params=params)
                 reward_truths = reward_pairs_decode[:, :, -1]
                 reward_pred_loss = ((reward_pred - reward_truths)**2).mean()
                 kl_loss = -0.5 * (1 + w_log_std - w_mean**2 - jnp.exp(w_log_std)).mean()
@@ -223,18 +230,18 @@ class FREAgent(flax.struct.PyTreeNode):
                 # Value Loss: Update V towards expectile of min(q1, q2).
                 w_target_mean = w_no_grad
                 w_mean = w_no_grad
-                q1, q2 = agent.target_fre.do("get_critic")(w_target_mean, batch['observations'], batch['actions'])
+                q1, q2 = agent.target_do("get_critic")(w_target_mean, batch['observations'], batch['actions'])
                 q = jnp.minimum(q1, q2)
-                v = agent.fre.do("get_value")(w_mean, batch['observations'], params=params)
+                v = agent.fre.select("get_value")(w_mean, batch['observations'], params=params)
                 adv = q - v
                 v_loss = expectile_loss(adv, q - v, agent.config['expectile'])
                 v_loss = (v_loss).mean()
 
                 # Critic Loss. Update Q = r
-                next_v = jax.lax.stop_gradient(agent.fre.do("get_value")(w_mean, batch['next_observations']))
+                next_v = jax.lax.stop_gradient(agent.fre.select("get_value")(w_mean, batch['next_observations']))
                 q = batch['rewards'] + agent.config['discount'] * batch['masks'] * next_v
 
-                q1, q2 = agent.fre.do("get_critic")(w_mean, batch['observations'], batch['actions'], params=params)
+                q1, q2 = agent.fre.select("get_critic")(w_mean, batch['observations'], batch['actions'], params=params)
                 q_loss = (q1 - q) ** 2 + (q2 - q) ** 2
                 q_loss = (q_loss).mean()
 
@@ -254,23 +261,23 @@ class FREAgent(flax.struct.PyTreeNode):
                 # Actor Loss
                 actor_w = w_mean
                 if agent.config['actor_loss_type'] == 'awr':
-                    v = agent.fre.do("get_value")(w_no_grad, batch['observations'])
-                    q1, q2 = agent.fre.do("get_critic")(w_no_grad, batch['observations'], batch['actions'])
+                    v = agent.fre.select("get_value")(w_no_grad, batch['observations'])
+                    q1, q2 = agent.fre.select("get_critic")(w_no_grad, batch['observations'], batch['actions'])
                     q = jnp.minimum(q1, q2)
                     adv = q - v
 
                     actions = batch['actions']
                     exp_a = jnp.exp(adv * agent.config['temperature'])
                     exp_a = jnp.minimum(exp_a, 100.0)
-                    dist = agent.fre.do('get_actor')(actor_w, batch['observations'], params=params)
+                    dist = agent.fre.select('get_actor')(actor_w, batch['observations'], params=params)
                     log_probs = dist.log_prob(actions)
                     assert exp_a.shape == log_probs.shape
                     print("Log probs shape", log_probs.shape)
                     actor_loss = -(exp_a * log_probs).mean()
                 elif agent.config['actor_loss_type'] == 'ddpg':
-                    dist = agent.fre.do("get_actor")(actor_w, batch['observations'], params=params)
+                    dist = agent.fre.select("get_actor")(actor_w, batch['observations'], params=params)
                     normalized_actions = jnp.tanh(dist.loc)
-                    q1, q2 = agent.fre.do("get_critic")(w_no_grad, batch['observations'], normalized_actions)
+                    q1, q2 = agent.fre.select("get_critic")(w_no_grad, batch['observations'], normalized_actions)
                     q = (q1 + q2) / 2
 
                     q_loss = -q.mean()
@@ -312,22 +319,22 @@ class FREAgent(flax.struct.PyTreeNode):
             observations = jnp.concatenate([observations['observation'], observations['goal']], axis=-1)
         observations = jnp.expand_dims(observations, axis=0)
         print("Reward pairs shape", reward_pairs.shape)
-        w_mean, w_log_std = agent.fre.do('get_transformer_encoding')(reward_pairs)
+        w_mean, w_log_std = agent.fre.select('get_transformer_encoding')(reward_pairs)
         print("W shape", w_mean.shape)
-        actions = agent.fre.do('get_actor')(w_mean, observations, temperature=temperature).sample(seed=seed)
+        actions = agent.fre.select('get_actor')(w_mean, observations, temperature=temperature).sample(seed=seed)
         actions = jnp.clip(actions, -1, 1)
         return actions[0]
     
     def get_reward_pred(agent, observations: np.ndarray, reward_pairs: np.ndarray):
         # append a dummy reward to the observations.
         decode_pairs = jnp.concatenate([observations, np.ones((observations.shape[0], 1))], axis=-1)[None]
-        w_mean, w_log_std = agent.fre.do('get_transformer_encoding')(reward_pairs)
-        return agent.fre.do('get_reward_pred')(w_mean, decode_pairs)
+        w_mean, w_log_std = agent.fre.select('get_transformer_encoding')(reward_pairs)
+        return agent.fre.select('get_reward_pred')(w_mean, decode_pairs)
     
     def get_value_pred(agent, observations: np.ndarray, reward_pairs: np.ndarray):
-        w_mean, w_log_std = agent.fre.do('get_transformer_encoding')(reward_pairs) # [batch, emb_dim]
+        w_mean, w_log_std = agent.fre.select('get_transformer_encoding')(reward_pairs) # [batch, emb_dim]
         w_expand = jnp.repeat(w_mean, repeats=observations.shape[0], axis=0)
-        v = agent.fre.do('get_value')(w_expand, observations)
+        v = agent.fre.select('get_value')(w_expand, observations)
         return v
 
 def create_learner(
@@ -396,7 +403,7 @@ def main(_):
             pickle.dump(get_flag_dict(), f)
 
     if 'ant' in FLAGS.env_name:
-        import fre.common.envs.d4rl.d4rl_ant as d4rl_ant
+        import common.envs.d4rl.d4rl_ant as d4rl_ant
         env = d4rl_ant.CenteredMaze(FLAGS.env_name)
         dataset = get_dataset(env, FLAGS.env_name)
         dataset = dataset.copy({'masks': np.ones_like(dataset['masks'])})
@@ -694,7 +701,7 @@ def main(_):
                 wandb.log(eval_rew_metrics, step=i)
 
         # Evaluate on test tasks. These are training tasks AND test tasks.
-        if i % FLAGS.eval_interval == 0 or (i == 10000 and FLAGS.eval_interval < 10006000):
+        if i % FLAGS.eval_interval == 0 or (i == 5 and FLAGS.eval_interval < 10006000):
             print("Performing Eval Loop")
             record_video = i % FLAGS.video_interval == 0
             eval_metrics = {}
@@ -730,33 +737,33 @@ def main(_):
 
                 # Antmaze Specific Logging
                 if 'antmaze' in FLAGS.env_name and 'large' in FLAGS.env_name and FLAGS.env_name.startswith('antmaze'):
-                    import fre.experiment.ant_helper as ant_helper
+                    import experiment.ant_helper as ant_helper
                     # Make an image of the trajectories.
                     traj_image = d4rl_ant.trajectory_image(eval_env, trajs)
-                    # eval_metrics[f'trajectories/{test_reward_label}'] = wandb.Image(traj_image)
+                    eval_metrics[f'trajectories/{test_reward_label}'] = wandb.Image(traj_image)
 
                     # Make image of reward function predictions.
                     test_reward_expand = np.tile(test_reward_params[None, :], (280, 1)) # (280, 3)
                     ground_truth_rew = lambda s_grid : test_reward_generator.compute_reward(s_grid, test_reward_expand)
                     true_rew_img = ant_helper.value_image(eval_env, dataset, ground_truth_rew, None)
-                    # eval_metrics[f'draw_true/{test_reward_label}'] = wandb.Image(true_rew_img)
+                    eval_metrics[f'draw_true/{test_reward_label}'] = wandb.Image(true_rew_img)
 
                     mask = []
                     for pair in test_reward_pairs[0]:
                         mask.append(pair[:2])
                     mask_rew_img = ant_helper.value_image(eval_env, dataset, ground_truth_rew, mask)
-                    # eval_metrics[f'draw_mask/{test_reward_label}'] = wandb.Image(mask_rew_img)
+                    eval_metrics[f'draw_mask/{test_reward_label}'] = wandb.Image(mask_rew_img)
 
                     pred_rew = lambda s_grid : agent.get_reward_pred(s_grid, test_reward_pairs)
                     pred_rew_img = ant_helper.value_image(eval_env, dataset, pred_rew, None)
-                    # eval_metrics[f'draw_pred/{test_reward_label}'] = wandb.Image(pred_rew_img)
+                    eval_metrics[f'draw_pred/{test_reward_label}'] = wandb.Image(pred_rew_img)
 
                     def pred_value(s_grid):
                         if FLAGS.use_discrete_xy and 'ant' in FLAGS.env_name:
                             s_grid = d4rl_ant.discretize_obs(s_grid)
                         return agent.get_value_pred(s_grid, test_reward_pairs)
                     pred_value_img = ant_helper.value_image(eval_env, dataset, pred_value, None, clip=False)
-                    # eval_metrics[f'draw_value1/{test_reward_label}'] = wandb.Image(pred_value_img1)
+                    eval_metrics[f'draw_value1/{test_reward_label}'] = wandb.Image(pred_value_img)
 
 
                     full_img = np.concatenate([

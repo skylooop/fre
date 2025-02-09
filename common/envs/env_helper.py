@@ -15,8 +15,8 @@ import os.path as osp
 import gym
 import numpy as np
 import functools as ft
-from fre.common.train_state import NormalizeActionWrapper
-from fre.common.envs.wrappers import EpisodeMonitor
+from common.train_state import NormalizeActionWrapper
+from common.envs.wrappers import EpisodeMonitor
 
 
 # Supported envs:
@@ -131,16 +131,16 @@ def make_env(env_name, **kwargs):
 # For getting offline data.
 def get_dataset(env, env_name, **kwargs):
     if 'exorl' in env_name:
-        from fre.common.envs.exorl.exorl_utils import get_dataset
+        from common.envs.exorl.exorl_utils import get_dataset
         env_name_short = env_name.split('_', 1)[1]
         return get_dataset(env, env_name_short, **kwargs)
     elif 'ant' in env_name or 'maze2d' in env_name or 'kitchen' in env_name or 'halfcheetah' in env_name or 'walker2d' in env_name or 'hopper' in env_name:
-        from fre.common.envs.d4rl.d4rl_utils import get_dataset, normalize_dataset
+        from common.envs.d4rl.d4rl_utils import get_dataset, normalize_dataset
         dataset = get_dataset(env, env_name, **kwargs)
         dataset = normalize_dataset(env_name, dataset)
         return dataset
     elif 'cartpole' in env_name or 'cheetah' in env_name or 'jaco' in env_name or 'quadruped' in env_name or 'walker' in env_name:
-        from fre.common.envs.exorl.exorl_utils import get_dataset
+        from common.envs.exorl.exorl_utils import get_dataset
         return get_dataset(env, env_name, **kwargs)
     
 def make_vec_env(env_name, num_envs, **kwargs):

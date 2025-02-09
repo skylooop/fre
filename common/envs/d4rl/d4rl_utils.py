@@ -5,8 +5,8 @@ import numpy as np
 from jax import tree_util
 
 
-import fre.common.envs.d4rl.d4rl_ant as d4rl_ant
-from fre.common.dataset import Dataset
+import common.envs.d4rl.d4rl_ant as d4rl_ant
+from common.dataset import Dataset
 
 
 # Note on AntMaze. Reward = 1 at the goal, and Terminal = 1 at the goal.

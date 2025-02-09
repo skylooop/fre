@@ -4,7 +4,7 @@
 #
 ###############################
 
-from fre.common.typing import *
+from common.typing import *
 import flax
 import flax.linen as nn
 import jax
@@ -130,9 +130,6 @@ class TrainState(flax.struct.PyTreeNode):
 
         return self.apply_fn(variables, *args, method=method, **kwargs)
     
-    def do(self, method):
-        return functools.partial(self, method=method)
-
     def apply_gradients(self, *, grads, **kwargs):
         """Updates `step`, `params`, `opt_state` and `**kwargs` in return value.
 
@@ -158,6 +155,10 @@ class TrainState(flax.struct.PyTreeNode):
             **kwargs,
         )
 
+    def select(self, method):
+        """Helper function to select a module from a `ModuleDict`."""
+        return functools.partial(self, method=method)
+    
     def apply_loss_fn(self, *, loss_fn, pmap_axis=None, has_aux=False):
         """
         Takes a gradient step towards minimizing `loss_fn`. Internally, this calls

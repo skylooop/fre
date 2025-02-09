@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 
-from fre.experiment.rewards_unsupervised import RewardFunction
+from experiment.rewards_unsupervised import RewardFunction
 
 
 class VelocityRewardFunction(RewardFunction):

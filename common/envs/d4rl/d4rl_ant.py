@@ -12,19 +12,24 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import os
 import os.path as osp
 
-import gym
 import d4rl
+import gymnasium as gym
 import numpy as np
 import functools as ft
 import math
 import matplotlib.gridspec as gridspec
+from common.envs.gc_utils import GCDataset
 
-from fre.common.envs.gc_utils import GCDataset
+def make_env(env_name, **kwargs):
+    """Make D4RL environment."""
+    env = gym.make('GymV21Environment-v0', env_id=env_name, render_mode='rgb_array', disable_env_checker=True)
+    return env
 
 class MazeWrapper(gym.Wrapper):
     def __init__(self, env_name):
-        self.env = gym.make(env_name)
-        self.env.render(mode='rgb_array', width=200, height=200)
+        self.env = make_env(env_name=env_name)
+        self.env.reset()
+        self.env.render()
         self.env_name = env_name
         self.inner_env = get_inner_env(self.env)
         if 'antmaze' in env_name:
@@ -135,16 +140,17 @@ class CenteredMaze(MazeWrapper):
         self.t = 0
 
     def step(self, action):
-        next_obs, r, done, info = self.env.step(action)
+        next_obs, r, terminated, truncated, info = self.env.step(action)
         if 'antmaze' in self.env_name:
             info['x'], info['y'] = self.get_xy()
         self.t += 1
         done = self.t >= 2000
+        done = terminated or truncated
         return next_obs, r, done, info
 
     def reset(self, **kwargs):
         self.t = 0
-        obs = self.env.reset(**kwargs)
+        obs, info = self.env.reset(**kwargs)
         if 'maze2d' in self.env_name:
             if self.start_loc == 'center' or self.start_loc == 'center2':
                 obs = self.env.reset_to_location([4, 5.8])
